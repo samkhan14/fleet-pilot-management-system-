@@ -1,4 +1,4 @@
-import { Head, useForm } from '@inertiajs/react';
+import { Head, router, useForm, usePage } from '@inertiajs/react';
 import { money } from '@/components/operations/status-badge';
 import { Button } from '@/components/ui/button';
 
@@ -26,6 +26,9 @@ export default function BillingIndex({
     currency: string;
     tax_rate_bps: number;
 }) {
+    const { auth } = usePage().props;
+    const canWrite =
+        auth.role === 'owner' || auth.permissions?.includes('finance.write');
     const form = useForm({
         shipment_id: '',
         description: 'Linehaul',
@@ -74,62 +77,137 @@ export default function BillingIndex({
                                     )}
                                 </td>
                                 <td className="px-3 py-2">
-                                    {charge.billing_status} /{' '}
-                                    {charge.payment_status}
+                                    {canWrite ? (
+                                        <span className="flex flex-wrap gap-1">
+                                            <select
+                                                aria-label={`${charge.description} billing`}
+                                                className="h-8 rounded-md border px-1"
+                                                value={charge.billing_status}
+                                                onChange={(event) =>
+                                                    router.patch(
+                                                        `/billing/charges/${charge.id}`,
+                                                        {
+                                                            billing_status:
+                                                                event.target
+                                                                    .value,
+                                                            payment_status:
+                                                                charge.payment_status,
+                                                            invoice_reference:
+                                                                charge.invoice_reference ??
+                                                                '',
+                                                        },
+                                                    )
+                                                }
+                                            >
+                                                <option value="unbilled">
+                                                    unbilled
+                                                </option>
+                                                <option value="invoiced">
+                                                    invoiced
+                                                </option>
+                                                <option value="void">
+                                                    void
+                                                </option>
+                                            </select>
+                                            <select
+                                                aria-label={`${charge.description} payment`}
+                                                className="h-8 rounded-md border px-1"
+                                                value={charge.payment_status}
+                                                onChange={(event) =>
+                                                    router.patch(
+                                                        `/billing/charges/${charge.id}`,
+                                                        {
+                                                            billing_status:
+                                                                charge.billing_status,
+                                                            payment_status:
+                                                                event.target
+                                                                    .value,
+                                                            invoice_reference:
+                                                                charge.invoice_reference ??
+                                                                '',
+                                                        },
+                                                    )
+                                                }
+                                            >
+                                                <option value="unpaid">
+                                                    unpaid
+                                                </option>
+                                                <option value="partial">
+                                                    partial
+                                                </option>
+                                                <option value="paid">
+                                                    paid
+                                                </option>
+                                                <option value="written_off">
+                                                    written off
+                                                </option>
+                                            </select>
+                                        </span>
+                                    ) : (
+                                        <>
+                                            {charge.billing_status} /{' '}
+                                            {charge.payment_status}
+                                        </>
+                                    )}
                                 </td>
                             </tr>
                         ))}
                     </tbody>
                 </table>
             </div>
-            <form
-                className="grid gap-2 md:grid-cols-4"
-                onSubmit={(event) => {
-                    event.preventDefault();
-                    form.post('/billing/charges');
-                }}
-            >
-                <input
-                    required
-                    aria-label="Shipment id"
-                    placeholder="Shipment id"
-                    className="h-9 rounded-md border px-2"
-                    value={form.data.shipment_id}
-                    onChange={(event) =>
-                        form.setData('shipment_id', event.target.value)
-                    }
-                />
-                <input
-                    aria-label="Description"
-                    className="h-9 rounded-md border px-2"
-                    value={form.data.description}
-                    onChange={(event) =>
-                        form.setData('description', event.target.value)
-                    }
-                />
-                <select
-                    aria-label="Kind"
-                    className="h-9 rounded-md border px-2"
-                    value={form.data.kind}
-                    onChange={(event) =>
-                        form.setData('kind', event.target.value)
-                    }
+            {canWrite && (
+                <form
+                    className="grid gap-2 md:grid-cols-4"
+                    onSubmit={(event) => {
+                        event.preventDefault();
+                        form.post('/billing/charges');
+                    }}
                 >
-                    <option value="base">Base</option>
-                    <option value="accessorial">Accessorial</option>
-                    <option value="discount">Discount</option>
-                </select>
-                <input
-                    aria-label="Amount cents"
-                    type="number"
-                    className="h-9 rounded-md border px-2"
-                    value={form.data.amount_cents}
-                    onChange={(event) =>
-                        form.setData('amount_cents', Number(event.target.value))
-                    }
-                />
-                <Button type="submit">Add charge</Button>
-            </form>
+                    <input
+                        required
+                        aria-label="Shipment id"
+                        placeholder="Shipment id"
+                        className="h-9 rounded-md border px-2"
+                        value={form.data.shipment_id}
+                        onChange={(event) =>
+                            form.setData('shipment_id', event.target.value)
+                        }
+                    />
+                    <input
+                        aria-label="Description"
+                        className="h-9 rounded-md border px-2"
+                        value={form.data.description}
+                        onChange={(event) =>
+                            form.setData('description', event.target.value)
+                        }
+                    />
+                    <select
+                        aria-label="Kind"
+                        className="h-9 rounded-md border px-2"
+                        value={form.data.kind}
+                        onChange={(event) =>
+                            form.setData('kind', event.target.value)
+                        }
+                    >
+                        <option value="base">Base</option>
+                        <option value="accessorial">Accessorial</option>
+                        <option value="discount">Discount</option>
+                    </select>
+                    <input
+                        aria-label="Amount cents"
+                        type="number"
+                        className="h-9 rounded-md border px-2"
+                        value={form.data.amount_cents}
+                        onChange={(event) =>
+                            form.setData(
+                                'amount_cents',
+                                Number(event.target.value),
+                            )
+                        }
+                    />
+                    <Button type="submit">Add charge</Button>
+                </form>
+            )}
         </div>
     );
 }

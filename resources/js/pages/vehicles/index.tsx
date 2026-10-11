@@ -1,4 +1,4 @@
-import { Head, router, useForm } from '@inertiajs/react';
+import { Head, router, useForm, usePage } from '@inertiajs/react';
 import { StatusBadge } from '@/components/operations/status-badge';
 import { Button } from '@/components/ui/button';
 
@@ -14,6 +14,9 @@ type Vehicle = {
 };
 
 export default function VehiclesIndex({ vehicles }: { vehicles: Vehicle[] }) {
+    const { auth } = usePage().props;
+    const canWrite =
+        auth.role === 'owner' || auth.permissions?.includes('vehicles.write');
     const form = useForm({
         fleet_number: '',
         registration: '',
@@ -39,23 +42,31 @@ export default function VehiclesIndex({ vehicles }: { vehicles: Vehicle[] }) {
                         </span>
                         <span className="flex items-center gap-2">
                             <StatusBadge value={vehicle.maintenance_status} />
-                            <button
-                                className="text-primary"
-                                type="button"
-                                onClick={() =>
-                                    router.patch(`/vehicles/${vehicle.id}`, {
-                                        availability:
-                                            vehicle.availability === 'available'
-                                                ? 'unavailable'
-                                                : 'available',
-                                        status: vehicle.status,
-                                        maintenance_status:
-                                            vehicle.maintenance_status,
-                                    })
-                                }
-                            >
-                                Toggle availability
-                            </button>
+                            {canWrite && (
+                                <select
+                                    aria-label={`${vehicle.fleet_number} maintenance`}
+                                    className="h-8 rounded-md border px-2"
+                                    value={vehicle.maintenance_status}
+                                    onChange={(event) =>
+                                        router.patch(
+                                            `/vehicles/${vehicle.id}`,
+                                            {
+                                                availability:
+                                                    vehicle.availability,
+                                                status: vehicle.status,
+                                                maintenance_status:
+                                                    event.target.value,
+                                            },
+                                        )
+                                    }
+                                >
+                                    <option value="ok">ok</option>
+                                    <option value="due">due</option>
+                                    <option value="out_of_service">
+                                        out of service
+                                    </option>
+                                </select>
+                            )}
                         </span>
                     </div>
                 ))}

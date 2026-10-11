@@ -1,4 +1,4 @@
-import { Head, useForm } from '@inertiajs/react';
+import { Head, router, useForm, usePage } from '@inertiajs/react';
 import { StatusBadge } from '@/components/operations/status-badge';
 import { Button } from '@/components/ui/button';
 
@@ -15,6 +15,9 @@ type Driver = {
 };
 
 export default function DriversIndex({ drivers }: { drivers: Driver[] }) {
+    const { auth } = usePage().props;
+    const canWrite =
+        auth.role === 'owner' || auth.permissions?.includes('drivers.write');
     const form = useForm({
         name: '',
         phone: '',
@@ -49,9 +52,58 @@ export default function DriversIndex({ drivers }: { drivers: Driver[] }) {
                                 </span>
                             )}
                         </div>
-                        <span className="flex gap-2">
+                        <span className="flex flex-wrap items-center gap-2">
                             <StatusBadge value={driver.availability} />
                             <StatusBadge value={driver.status} />
+                            {canWrite && (
+                                <>
+                                    <select
+                                        aria-label={`${driver.name} availability`}
+                                        className="h-8 rounded-md border px-2"
+                                        value={driver.availability}
+                                        onChange={(event) =>
+                                            router.patch(
+                                                `/drivers/${driver.id}`,
+                                                {
+                                                    availability:
+                                                        event.target.value,
+                                                    status: driver.status,
+                                                },
+                                            )
+                                        }
+                                    >
+                                        <option value="available">
+                                            available
+                                        </option>
+                                        <option value="unavailable">
+                                            unavailable
+                                        </option>
+                                        <option value="off_duty">
+                                            off duty
+                                        </option>
+                                    </select>
+                                    <select
+                                        aria-label={`${driver.name} status`}
+                                        className="h-8 rounded-md border px-2"
+                                        value={driver.status}
+                                        onChange={(event) =>
+                                            router.patch(
+                                                `/drivers/${driver.id}`,
+                                                {
+                                                    availability:
+                                                        driver.availability,
+                                                    status: event.target.value,
+                                                },
+                                            )
+                                        }
+                                    >
+                                        <option value="active">active</option>
+                                        <option value="inactive">
+                                            inactive
+                                        </option>
+                                    </select>
+                                </>
+                            )}
                         </span>
                     </div>
                 ))}

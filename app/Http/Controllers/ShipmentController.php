@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Domain\Dispatch\AssignShipment;
 use App\Domain\Shipments\CreateShipment;
+use App\Domain\Shipments\ShipmentState;
 use App\Domain\Shipments\TransitionShipment;
 use App\Domain\Tracking\IssueTrackingToken;
 use App\Http\Controllers\Concerns\UsesOrganization;
@@ -11,6 +12,7 @@ use App\Http\Presenters\OperationsPresenter;
 use App\Models\Customer;
 use App\Models\Driver;
 use App\Models\ShipmentException;
+use App\Models\TrackingToken;
 use App\Models\Vehicle;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -127,6 +129,28 @@ class ShipmentController extends Controller
             'charges' => $ctx->allows('finance.read') ? $record->charges->map(fn ($charge) => $presenter->charge($charge))->values() : [],
             'drivers' => $ctx->allows('dispatch.manage') ? Driver::query()->where('organization_id', $ctx->organization->id)->where('status', 'active')->orderBy('name')->get(['id', 'name', 'availability']) : [],
             'vehicles' => $ctx->allows('dispatch.manage') ? Vehicle::query()->where('organization_id', $ctx->organization->id)->where('status', 'active')->orderBy('fleet_number')->get(['id', 'fleet_number', 'availability', 'maintenance_status']) : [],
+            'next_statuses' => collect(app(TransitionShipment::class)->allowedTargets($ctx, $record))
+                ->map(fn (string $status): array => [
+                    'value' => $status,
+                    'label' => str_replace('_', ' ', $status),
+                    'reason_required' => in_array($status, ShipmentState::REASON_REQUIRED, true),
+                ])->values(),
+            'can' => [
+                'dispatch' => $ctx->allows('dispatch.manage'),
+                'reschedule' => ($ctx->allows('shipments.write') || $ctx->allows('dispatch.manage')) && ! in_array($record->status, ShipmentState::TERMINAL, true),
+                'tracking' => $ctx->allows('tracking.manage'),
+                'exceptions' => $ctx->allows('exceptions.write'),
+                'documents' => $ctx->allows('documents.write'),
+            ],
+            'document_types' => $ctx->organization->settings->document_types ?? [],
+            'exception_categories' => ShipmentException::CATEGORIES,
+            'tracking_tokens' => $ctx->allows('tracking.manage')
+                ? TrackingToken::query()->where('shipment_id', $record->id)->orderByDesc('id')->get()->map(fn (TrackingToken $token): array => [
+                    'id' => $token->id,
+                    'expires_at' => $token->expires_at->toIso8601String(),
+                    'revoked_at' => $token->revoked_at?->toIso8601String(),
+                ])->values()
+                : [],
         ]);
     }
 
@@ -175,12 +199,25 @@ class ShipmentController extends Controller
         return back()->with('tracking_token', $issued['token']);
     }
 
+    public function revokeToken(int $shipment, int $token, IssueTrackingToken $tokens): RedirectResponse
+    {
+        $ctx = $this->authorizePermission('tracking.manage');
+        $record = $ctx->shipments()->findOrFail($shipment);
+        $row = TrackingToken::query()
+            ->where('organization_id', $ctx->organization->id)
+            ->where('shipment_id', $record->id)
+            ->findOrFail($token);
+        $tokens->revoke($ctx, $row);
+
+        return back()->with('success', 'Tracking link revoked.');
+    }
+
     public function reportException(Request $request, int $shipment): RedirectResponse
     {
         $ctx = $this->authorizePermission('exceptions.write');
         $record = $ctx->shipments()->findOrFail($shipment);
         $data = $request->validate([
-            'category' => ['required', 'in:delayed_pickup,delayed_delivery,failed_delivery,incorrect_address,damaged_goods,missing_goods,vehicle_breakdown,driver_unavailable,customer_cancellation'],
+            'category' => ['required', 'in:'.implode(',', ShipmentException::CATEGORIES)],
             'severity' => ['required', 'in:low,medium,high,critical'],
             'description' => ['required', 'string', 'max:2000'],
         ]);

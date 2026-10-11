@@ -58,6 +58,30 @@ class CustomerController extends Controller
         return redirect()->route('customers.show', $customer);
     }
 
+    public function update(Request $request, int $customer, Activity $activity): RedirectResponse
+    {
+        $ctx = $this->authorizePermission('customers.write');
+        $record = $ctx->customers()->findOrFail($customer);
+        $data = $request->validate([
+            'name' => ['required', 'string', 'max:160'],
+            'company_name' => ['nullable', 'string', 'max:160'],
+            'email' => ['nullable', 'email', 'max:160'],
+            'phone' => ['nullable', 'string', 'max:40'],
+            'billing_name' => ['nullable', 'string', 'max:160'],
+            'billing_email' => ['nullable', 'email', 'max:160'],
+            'billing_line1' => ['nullable', 'string', 'max:160'],
+            'billing_city' => ['nullable', 'string', 'max:80'],
+            'billing_region' => ['nullable', 'string', 'max:80'],
+            'billing_postal_code' => ['nullable', 'string', 'max:20'],
+            'billing_country' => ['nullable', 'string', 'max:56'],
+            'notes' => ['nullable', 'string', 'max:2000'],
+        ]);
+        $record->fill($data)->save();
+        $activity->record($ctx, 'customer.updated', 'customer', $record->id);
+
+        return back()->with('success', 'Customer updated.');
+    }
+
     public function show(int $customer): Response
     {
         $ctx = $this->authorizePermission('customers.read');

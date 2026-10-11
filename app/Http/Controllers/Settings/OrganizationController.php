@@ -8,12 +8,13 @@ use App\Http\Controllers\Concerns\UsesOrganization;
 use App\Http\Controllers\Controller;
 use App\Models\Customer;
 use App\Models\Driver;
+use App\Models\Membership;
 use App\Models\PermissionGrant;
 use App\Models\User;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -82,25 +83,39 @@ class OrganizationController extends Controller
             'email' => ['required', 'email', 'max:160'],
             'password' => ['required', 'string', 'min:8'],
             'role' => ['required', Rule::in(array_keys(Permissions::defaults()))],
-            'customer_id' => ['nullable', 'integer'],
-            'driver_id' => ['nullable', 'integer'],
+            'customer_id' => ['required_if:role,customer', 'nullable', 'integer'],
+            'driver_id' => ['required_if:role,driver', 'nullable', 'integer'],
         ]);
         if ($data['role'] === 'owner') {
             abort(403, 'Owner membership is not created from this form.');
         }
+        $customerId = null;
+        $driverId = null;
         if ($data['role'] === 'customer') {
-            Customer::query()->where('organization_id', $ctx->organization->id)->findOrFail($data['customer_id']);
+            if (! is_numeric($data['customer_id'] ?? null)) {
+                throw ValidationException::withMessages(['customer_id' => 'Choose the customer this login can see.']);
+            }
+            $customerId = Customer::query()->where('organization_id', $ctx->organization->id)->whereKey((int) $data['customer_id'])->firstOrFail()->id;
         }
         if ($data['role'] === 'driver') {
-            Driver::query()->where('organization_id', $ctx->organization->id)->findOrFail($data['driver_id']);
+            if (! is_numeric($data['driver_id'] ?? null)) {
+                throw ValidationException::withMessages(['driver_id' => 'Choose the driver this login represents.']);
+            }
+            $driverId = Driver::query()->where('organization_id', $ctx->organization->id)->whereKey((int) $data['driver_id'])->firstOrFail()->id;
+            if (Membership::query()->where('driver_id', $driverId)->exists()) {
+                throw ValidationException::withMessages(['driver_id' => 'That driver already has a login.']);
+            }
         }
         $user = User::query()->firstOrCreate(
             ['email' => strtolower($data['email'])],
-            ['name' => $data['name'], 'password' => Hash::make($data['password']), 'email_verified_at' => now()],
+            ['name' => $data['name'], 'password' => $data['password'], 'email_verified_at' => now()],
         );
-        $provision->addMember($ctx->organization, $user, $data['role'], $data['customer_id'] ?? null, $data['driver_id'] ?? null);
+        if (Membership::query()->where('organization_id', $ctx->organization->id)->where('user_id', $user->id)->exists()) {
+            throw ValidationException::withMessages(['email' => 'That account is already a member.']);
+        }
+        $provision->addMember($ctx->organization, $user, $data['role'], $customerId, $driverId);
 
-        return back();
+        return back()->with('success', 'Member added.');
     }
 
     public function updateGrants(Request $request): RedirectResponse

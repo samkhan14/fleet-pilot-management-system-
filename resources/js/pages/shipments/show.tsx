@@ -46,6 +46,32 @@ type EventRow = {
     occurred_at?: string | null;
 };
 
+function localInput(
+    value: string | null | undefined,
+    timeZone?: string,
+): string {
+    if (!value) {
+        return '';
+    }
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+        return '';
+    }
+    const parts = new Intl.DateTimeFormat('en-CA', {
+        timeZone: timeZone || 'UTC',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        hourCycle: 'h23',
+    }).formatToParts(date);
+    const pick = (type: Intl.DateTimeFormatPartTypes) =>
+        parts.find((part) => part.type === type)?.value ?? '';
+
+    return `${pick('year')}-${pick('month')}-${pick('day')}T${pick('hour')}:${pick('minute')}`;
+}
+
 function mapsHref(address: Address | null): string | null {
     if (!address) {
         return null;
@@ -72,6 +98,11 @@ export default function ShipmentShow({
     drivers,
     vehicles,
     older_cursor,
+    next_statuses,
+    can,
+    document_types,
+    exception_categories,
+    tracking_tokens,
 }: {
     shipment: Shipment;
     events: EventRow[];
@@ -114,9 +145,29 @@ export default function ShipmentShow({
         maintenance_status: string;
     }>;
     older_cursor?: number;
+    next_statuses: Array<{
+        value: string;
+        label: string;
+        reason_required: boolean;
+    }>;
+    can: {
+        dispatch: boolean;
+        reschedule: boolean;
+        tracking: boolean;
+        exceptions: boolean;
+        documents: boolean;
+    };
+    document_types: string[];
+    exception_categories: string[];
+    tracking_tokens: Array<{
+        id: number;
+        expires_at: string;
+        revoked_at?: string | null;
+    }>;
 }) {
-    const { flash, auth } = usePage().props as {
+    const { flash, auth, errors } = usePage().props as {
         flash?: { success?: string; tracking_token?: string };
+        errors?: Record<string, string>;
         auth: {
             role?: string;
             permissions?: string[];
@@ -124,6 +175,7 @@ export default function ShipmentShow({
         };
     };
     const [reason, setReason] = useState('');
+    const [customerMessage, setCustomerMessage] = useState('');
     const tz = auth.organization?.timezone;
     const canDispatch =
         auth.role === 'owner' || auth.permissions?.includes('dispatch.manage');
@@ -132,11 +184,37 @@ export default function ShipmentShow({
         vehicle_id: vehicles[0]?.id ?? '',
         notes: '',
     });
+    const release = useForm({ reason: '' });
+    const schedule = useForm({
+        pickup_window_start: localInput(shipment.pickup_window_start, tz),
+        pickup_window_end: localInput(shipment.pickup_window_end, tz),
+        delivery_window_start: localInput(shipment.delivery_window_start, tz),
+        delivery_window_end: localInput(shipment.delivery_window_end, tz),
+        reason: '',
+    });
+    const exception = useForm({
+        category: exception_categories[0] ?? 'delayed_delivery',
+        severity: 'medium',
+        description: '',
+    });
+    const upload = useForm<{
+        shipment_id: number;
+        title: string;
+        doc_type: string;
+        visibility: string;
+        file: File | null;
+    }>({
+        shipment_id: shipment.id,
+        title: '',
+        doc_type: document_types[0] ?? 'other',
+        visibility: 'internal',
+        file: null,
+    });
 
     const transition = (to: string) => {
         router.post(
             `/shipments/${shipment.id}/transition`,
-            { to, reason },
+            { to, reason, customer_message: customerMessage },
             { preserveScroll: true },
         );
     };
@@ -246,61 +324,198 @@ export default function ShipmentShow({
                     </p>
                 )}
             </section>
-            {canDispatch && (
+            {canDispatch &&
+                ['ready_for_dispatch', 'failed_pickup', 'assigned'].includes(
+                    shipment.status,
+                ) && (
+                    <form
+                        className="flex flex-wrap items-end gap-2 rounded-lg border bg-card p-3"
+                        onSubmit={(event) => {
+                            event.preventDefault();
+                            assign.post(`/shipments/${shipment.id}/assign`);
+                        }}
+                    >
+                        <label className="text-sm">
+                            Driver
+                            <select
+                                className="mt-1 block h-9 rounded-md border px-2"
+                                value={assign.data.driver_id}
+                                onChange={(event) =>
+                                    assign.setData(
+                                        'driver_id',
+                                        Number(event.target.value),
+                                    )
+                                }
+                            >
+                                {drivers.map((driver) => (
+                                    <option key={driver.id} value={driver.id}>
+                                        {driver.name} ({driver.availability})
+                                    </option>
+                                ))}
+                            </select>
+                        </label>
+                        <label className="text-sm">
+                            Vehicle
+                            <select
+                                className="mt-1 block h-9 rounded-md border px-2"
+                                value={assign.data.vehicle_id}
+                                onChange={(event) =>
+                                    assign.setData(
+                                        'vehicle_id',
+                                        Number(event.target.value),
+                                    )
+                                }
+                            >
+                                {vehicles.map((vehicle) => (
+                                    <option key={vehicle.id} value={vehicle.id}>
+                                        {vehicle.fleet_number} (
+                                        {vehicle.maintenance_status})
+                                    </option>
+                                ))}
+                            </select>
+                        </label>
+                        <Button disabled={assign.processing} type="submit">
+                            Assign
+                        </Button>
+                        <p className="text-xs text-destructive">
+                            {assign.errors.driver_id ||
+                                assign.errors.vehicle_id ||
+                                (
+                                    assign.errors as Record<
+                                        string,
+                                        string | undefined
+                                    >
+                                ).status}
+                        </p>
+                    </form>
+                )}
+            {next_statuses.length > 0 && (
+                <div className="flex flex-wrap items-end gap-2">
+                    <input
+                        className="h-9 min-w-56 rounded-md border bg-card px-2 text-sm"
+                        placeholder="Reason, when the change requires one"
+                        value={reason}
+                        onChange={(event) => setReason(event.target.value)}
+                        aria-label="Reason"
+                    />
+                    <input
+                        className="h-9 min-w-56 rounded-md border bg-card px-2 text-sm"
+                        placeholder="Customer-safe message"
+                        value={customerMessage}
+                        onChange={(event) =>
+                            setCustomerMessage(event.target.value)
+                        }
+                        aria-label="Customer-safe message"
+                    />
+                    {next_statuses.map((status) => (
+                        <Button
+                            key={status.value}
+                            type="button"
+                            variant={
+                                status.value === 'cancelled'
+                                    ? 'destructive'
+                                    : status.reason_required
+                                      ? 'outline'
+                                      : 'default'
+                            }
+                            onClick={() => transition(status.value)}
+                        >
+                            {status.label}
+                        </Button>
+                    ))}
+                    {errors?.status && (
+                        <p className="text-sm text-destructive">
+                            {errors.status}
+                        </p>
+                    )}
+                    {errors?.reason && (
+                        <p className="text-sm text-destructive">
+                            {errors.reason}
+                        </p>
+                    )}
+                    {errors?.evidence && (
+                        <p className="text-sm text-destructive">
+                            {errors.evidence}
+                        </p>
+                    )}
+                </div>
+            )}
+            {shipment.status === 'assigned' && can.dispatch && (
                 <form
                     className="flex flex-wrap items-end gap-2 rounded-lg border bg-card p-3"
                     onSubmit={(event) => {
                         event.preventDefault();
-                        assign.post(`/shipments/${shipment.id}/assign`);
+                        release.post(`/shipments/${shipment.id}/unassign`, {
+                            preserveScroll: true,
+                        });
                     }}
                 >
                     <label className="text-sm">
-                        Driver
-                        <select
+                        Unassign reason
+                        <input
+                            required
                             className="mt-1 block h-9 rounded-md border px-2"
-                            value={assign.data.driver_id}
+                            value={release.data.reason}
                             onChange={(event) =>
-                                assign.setData(
-                                    'driver_id',
-                                    Number(event.target.value),
-                                )
+                                release.setData('reason', event.target.value)
                             }
-                        >
-                            {drivers.map((driver) => (
-                                <option key={driver.id} value={driver.id}>
-                                    {driver.name} ({driver.availability})
-                                </option>
-                            ))}
-                        </select>
+                        />
                     </label>
-                    <label className="text-sm">
-                        Vehicle
-                        <select
-                            className="mt-1 block h-9 rounded-md border px-2"
-                            value={assign.data.vehicle_id}
-                            onChange={(event) =>
-                                assign.setData(
-                                    'vehicle_id',
-                                    Number(event.target.value),
-                                )
-                            }
-                        >
-                            {vehicles.map((vehicle) => (
-                                <option key={vehicle.id} value={vehicle.id}>
-                                    {vehicle.fleet_number} (
-                                    {vehicle.maintenance_status})
-                                </option>
-                            ))}
-                        </select>
-                    </label>
-                    <Button disabled={assign.processing} type="submit">
-                        Assign
+                    <Button type="submit" variant="outline">
+                        Unassign
                     </Button>
-                    <p className="text-xs text-destructive">
-                        {assign.errors.driver_id ||
-                            assign.errors.vehicle_id ||
+                </form>
+            )}
+            {can.reschedule && (
+                <form
+                    className="grid gap-2 rounded-lg border bg-card p-3 md:grid-cols-2"
+                    onSubmit={(event) => {
+                        event.preventDefault();
+                        schedule.post(`/shipments/${shipment.id}/reschedule`, {
+                            preserveScroll: true,
+                        });
+                    }}
+                >
+                    <h2 className="text-sm font-semibold md:col-span-2">
+                        Reschedule
+                    </h2>
+                    {(
+                        [
+                            ['pickup_window_start', 'Pickup start'],
+                            ['pickup_window_end', 'Pickup end'],
+                            ['delivery_window_start', 'Delivery start'],
+                            ['delivery_window_end', 'Delivery end'],
+                        ] as const
+                    ).map(([field, label]) => (
+                        <label key={field} className="text-sm">
+                            {label}
+                            <input
+                                required
+                                type="datetime-local"
+                                className="mt-1 block h-9 w-full rounded-md border px-2"
+                                value={schedule.data[field]}
+                                onChange={(event) =>
+                                    schedule.setData(field, event.target.value)
+                                }
+                            />
+                        </label>
+                    ))}
+                    <label className="text-sm md:col-span-2">
+                        Reason
+                        <input
+                            required
+                            className="mt-1 block h-9 w-full rounded-md border px-2"
+                            value={schedule.data.reason}
+                            onChange={(event) =>
+                                schedule.setData('reason', event.target.value)
+                            }
+                        />
+                    </label>
+                    <Button type="submit">Save schedule</Button>
+                    <p className="text-sm text-destructive">
+                        {schedule.errors.reason ||
                             (
-                                assign.errors as Record<
+                                schedule.errors as Record<
                                     string,
                                     string | undefined
                                 >
@@ -308,70 +523,56 @@ export default function ShipmentShow({
                     </p>
                 </form>
             )}
-            <div className="flex flex-wrap gap-2">
-                <input
-                    className="h-9 min-w-56 rounded-md border bg-card px-2 text-sm"
-                    placeholder="Reason for exception or cancel"
-                    value={reason}
-                    onChange={(event) => setReason(event.target.value)}
-                    aria-label="Reason"
-                />
-                {shipment.status === 'draft' && (
-                    <Button
-                        type="button"
-                        onClick={() => transition('ready_for_dispatch')}
-                    >
-                        Ready for dispatch
-                    </Button>
-                )}
-                {['assigned', 'failed_pickup'].includes(shipment.status) && (
-                    <Button
-                        type="button"
-                        onClick={() => transition('picked_up')}
-                    >
-                        Picked up
-                    </Button>
-                )}
-                {shipment.status === 'picked_up' && (
-                    <Button
-                        type="button"
-                        onClick={() => transition('in_transit')}
-                    >
-                        In transit
-                    </Button>
-                )}
-                {['in_transit', 'damaged_or_missing'].includes(
-                    shipment.status,
-                ) && (
-                    <Button
-                        type="button"
-                        onClick={() => transition('delivered')}
-                    >
-                        Delivered
-                    </Button>
-                )}
-                <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => transition('on_hold')}
-                >
-                    Hold
-                </Button>
-                <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => transition('failed_delivery')}
-                >
-                    Failed delivery
-                </Button>
-                <Button
-                    type="button"
-                    variant="destructive"
-                    onClick={() => transition('cancelled')}
-                >
-                    Cancel
-                </Button>
-            </div>
+            {can.tracking && (
+                <section className="rounded-lg border bg-card p-3 text-sm">
+                    <div className="flex items-center justify-between gap-2">
+                        <h2 className="font-semibold">Public tracking links</h2>
+                        <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() =>
+                                router.post(
+                                    `/shipments/${shipment.id}/tracking-token`,
+                                    {},
+                                    { preserveScroll: true },
+                                )
+                            }
+                        >
+                            Issue link
+                        </Button>
+                    </div>
+                    <p className="mt-1 text-muted-foreground">
+                        The raw link is shown once. Revoking it returns 410 to
+                        anyone who still has it.
+                    </p>
+                    {tracking_tokens.map((token) => (
+                        <p
+                            key={token.id}
+                            className="mt-2 flex flex-wrap items-center gap-2"
+                        >
+                            Expires {formatWhen(token.expires_at, tz)}
+                            {token.revoked_at
+                                ? ` · revoked ${formatWhen(token.revoked_at, tz)}`
+                                : ''}
+                            {!token.revoked_at && (
+                                <button
+                                    className="text-primary"
+                                    type="button"
+                                    onClick={() =>
+                                        router.post(
+                                            `/shipments/${shipment.id}/tracking-tokens/${token.id}/revoke`,
+                                            {},
+                                            { preserveScroll: true },
+                                        )
+                                    }
+                                >
+                                    Revoke
+                                </button>
+                            )}
+                        </p>
+                    ))}
+                </section>
+            )}
             <section>
                 <h2 className="mb-2 text-sm font-semibold">Tracking history</h2>
                 <ol className="space-y-2 border-l pl-4">
@@ -447,6 +648,68 @@ export default function ShipmentShow({
                             {item.description}
                         </p>
                     ))}
+                    {can.exceptions && (
+                        <form
+                            className="mt-2 grid gap-2"
+                            onSubmit={(event) => {
+                                event.preventDefault();
+                                exception.post(
+                                    `/shipments/${shipment.id}/exceptions`,
+                                    { preserveScroll: true },
+                                );
+                            }}
+                        >
+                            <select
+                                aria-label="Exception category"
+                                className="h-9 rounded-md border px-2"
+                                value={exception.data.category}
+                                onChange={(event) =>
+                                    exception.setData(
+                                        'category',
+                                        event.target.value,
+                                    )
+                                }
+                            >
+                                {exception_categories.map((category) => (
+                                    <option key={category} value={category}>
+                                        {category.replaceAll('_', ' ')}
+                                    </option>
+                                ))}
+                            </select>
+                            <select
+                                aria-label="Severity"
+                                className="h-9 rounded-md border px-2"
+                                value={exception.data.severity}
+                                onChange={(event) =>
+                                    exception.setData(
+                                        'severity',
+                                        event.target.value,
+                                    )
+                                }
+                            >
+                                {['low', 'medium', 'high', 'critical'].map(
+                                    (severity) => (
+                                        <option key={severity}>
+                                            {severity}
+                                        </option>
+                                    ),
+                                )}
+                            </select>
+                            <textarea
+                                required
+                                aria-label="Exception description"
+                                className="min-h-20 rounded-md border px-2 py-1"
+                                value={exception.data.description}
+                                onChange={(event) =>
+                                    exception.setData(
+                                        'description',
+                                        event.target.value,
+                                    )
+                                }
+                            />
+                            <Button type="submit">Report exception</Button>
+                        </form>
+                    )}
                     <h2 className="mt-4 text-sm font-semibold">Documents</h2>
                     {documents.map((document) => (
                         <p key={document.id} className="text-sm">
@@ -462,6 +725,79 @@ export default function ShipmentShow({
                             ))}
                         </p>
                     ))}
+                    {can.documents && (
+                        <form
+                            className="mt-2 grid gap-2"
+                            onSubmit={(event) => {
+                                event.preventDefault();
+                                upload.post('/documents', {
+                                    forceFormData: true,
+                                    preserveScroll: true,
+                                });
+                            }}
+                        >
+                            <input
+                                required
+                                aria-label="Document title"
+                                placeholder="Title"
+                                className="h-9 rounded-md border px-2"
+                                value={upload.data.title}
+                                onChange={(event) =>
+                                    upload.setData('title', event.target.value)
+                                }
+                            />
+                            <select
+                                aria-label="Document type"
+                                className="h-9 rounded-md border px-2"
+                                value={upload.data.doc_type}
+                                onChange={(event) =>
+                                    upload.setData(
+                                        'doc_type',
+                                        event.target.value,
+                                    )
+                                }
+                            >
+                                {document_types.map((type) => (
+                                    <option key={type} value={type}>
+                                        {type.replaceAll('_', ' ')}
+                                    </option>
+                                ))}
+                            </select>
+                            <select
+                                aria-label="Visibility"
+                                className="h-9 rounded-md border px-2"
+                                value={upload.data.visibility}
+                                onChange={(event) =>
+                                    upload.setData(
+                                        'visibility',
+                                        event.target.value,
+                                    )
+                                }
+                            >
+                                <option value="internal">Internal</option>
+                                <option value="customer_visible">
+                                    Customer visible
+                                </option>
+                                <option value="sensitive">Sensitive</option>
+                            </select>
+                            <input
+                                required
+                                aria-label="Document file"
+                                type="file"
+                                accept="image/jpeg,image/png,image/webp,application/pdf"
+                                onChange={(event) =>
+                                    upload.setData(
+                                        'file',
+                                        event.target.files?.[0] ?? null,
+                                    )
+                                }
+                            />
+                            <Button type="submit">Upload document</Button>
+                            <p className="text-sm text-destructive">
+                                {upload.errors.file || upload.errors.title}
+                            </p>
+                        </form>
+                    )}
                     {charges.length > 0 && (
                         <h2 className="mt-4 text-sm font-semibold">Charges</h2>
                     )}

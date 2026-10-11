@@ -247,6 +247,24 @@ final class TransitionShipment
         });
     }
 
+    /**
+     * @return list<string>
+     */
+    public function allowedTargets(OrganizationContext $ctx, Shipment $shipment): array
+    {
+        $targets = [];
+        foreach (ShipmentState::TRANSITIONS[$shipment->status] ?? [] as $to) {
+            try {
+                $this->authorize($ctx, $shipment, $to);
+            } catch (AuthorizationException) {
+                continue;
+            }
+            $targets[] = $to;
+        }
+
+        return $targets;
+    }
+
     private function authorize(OrganizationContext $ctx, Shipment $shipment, string $to): void
     {
         $needed = Permissions::STATUS_PERMISSION[$to] ?? null;

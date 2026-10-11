@@ -75,7 +75,7 @@ Counts are SQL, for the organization-local day, except where noted.
 - No offline driver queue. The driver UI requires a connection.
 - No production deploy and no claim that the log mailer delivers email.
 - Registration is still open. A user with no membership sees an empty dashboard until someone adds them.
-- The organization screen lists members. Grant editing is available to the domain endpoint; the matrix UI is not a full admin console.
+- The organization screen edits operating settings, adds members, and edits role grants. Owner access stays complete so the organization cannot be locked out.
 
 ## Tests
 

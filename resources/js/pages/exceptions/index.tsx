@@ -1,4 +1,4 @@
-import { Head, router } from '@inertiajs/react';
+import { Head, Link, router } from '@inertiajs/react';
 import { useState } from 'react';
 import { StatusBadge } from '@/components/operations/status-badge';
 import { Button } from '@/components/ui/button';
@@ -13,7 +13,7 @@ export default function ExceptionsIndex({
             severity: string;
             status: string;
             description: string;
-            shipment?: { shipment_number: string };
+            shipment?: { id: number; shipment_number: string };
         }>;
     };
 }) {
@@ -33,8 +33,15 @@ export default function ExceptionsIndex({
                         <StatusBadge value={item.severity} />
                     </div>
                     <p className="mt-2 font-medium">
-                        {item.shipment?.shipment_number} ·{' '}
-                        {item.category.replaceAll('_', ' ')}
+                        {item.shipment && (
+                            <Link
+                                className="text-primary"
+                                href={`/shipments/${item.shipment.id}`}
+                            >
+                                {item.shipment.shipment_number}
+                            </Link>
+                        )}{' '}
+                        · {item.category.replaceAll('_', ' ')}
                     </p>
                     <p>{item.description}</p>
                     {item.status !== 'resolved' && (
@@ -48,6 +55,7 @@ export default function ExceptionsIndex({
                             }}
                         >
                             <input
+                                required
                                 aria-label="Resolution notes"
                                 className="h-9 flex-1 rounded-md border px-2"
                                 value={notes[item.id] || ''}

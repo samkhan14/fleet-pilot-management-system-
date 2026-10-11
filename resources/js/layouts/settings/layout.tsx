@@ -1,4 +1,4 @@
-import { Link } from '@inertiajs/react';
+import { Link, usePage } from '@inertiajs/react';
 import type { PropsWithChildren } from 'react';
 import Heading from '@/components/heading';
 import { Button } from '@/components/ui/button';
@@ -30,6 +30,19 @@ const sidebarNavItems: NavItem[] = [
 
 export default function SettingsLayout({ children }: PropsWithChildren) {
     const { isCurrentOrParentUrl } = useCurrentUrl();
+    const { auth } = usePage().props;
+    const wide = isCurrentOrParentUrl('/settings/organization');
+    const items = [...sidebarNavItems];
+    if (
+        auth.role === 'owner' ||
+        auth.permissions?.includes('settings.manage')
+    ) {
+        items.push({
+            title: 'Organization',
+            href: '/settings/organization',
+            icon: null,
+        });
+    }
 
     return (
         <div className="px-4 py-6">
@@ -44,7 +57,7 @@ export default function SettingsLayout({ children }: PropsWithChildren) {
                         className="flex flex-col space-y-1 space-x-0"
                         aria-label="Settings"
                     >
-                        {sidebarNavItems.map((item, index) => (
+                        {items.map((item, index) => (
                             <Button
                                 key={`${toUrl(item.href)}-${index}`}
                                 size="sm"
@@ -67,8 +80,18 @@ export default function SettingsLayout({ children }: PropsWithChildren) {
 
                 <Separator className="my-6 lg:hidden" />
 
-                <div className="flex-1 md:max-w-2xl">
-                    <section className="max-w-xl space-y-12">
+                <div
+                    className={
+                        wide ? 'flex-1 md:max-w-4xl' : 'flex-1 md:max-w-2xl'
+                    }
+                >
+                    <section
+                        className={
+                            wide
+                                ? 'max-w-4xl space-y-12'
+                                : 'max-w-xl space-y-12'
+                        }
+                    >
                         {children}
                     </section>
                 </div>

@@ -89,6 +89,18 @@ const catalog: Array<NavItem & { permission?: string }> = [
         icon: LayoutGrid,
         permission: 'reports.read',
     },
+    {
+        title: 'Notices',
+        href: '/notifications',
+        icon: ClipboardList,
+        permission: 'notifications.read',
+    },
+    {
+        title: 'Organization',
+        href: '/settings/organization',
+        icon: Users,
+        permission: 'settings.manage',
+    },
 ];
 
 export function AppSidebar() {

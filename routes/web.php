@@ -8,6 +8,7 @@ use App\Http\Controllers\DocumentController;
 use App\Http\Controllers\DriveController;
 use App\Http\Controllers\ExceptionController;
 use App\Http\Controllers\FleetController;
+use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\PublicTrackingController;
 use App\Http\Controllers\ReportController;
 use App\Http\Controllers\Settings\OrganizationController;
@@ -32,12 +33,14 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::post('shipments/{shipment}/assign', [ShipmentController::class, 'assign'])->name('shipments.assign');
     Route::post('shipments/{shipment}/unassign', [ShipmentController::class, 'unassign'])->name('shipments.unassign');
     Route::post('shipments/{shipment}/tracking-token', [ShipmentController::class, 'token'])->name('shipments.token');
+    Route::post('shipments/{shipment}/tracking-tokens/{token}/revoke', [ShipmentController::class, 'revokeToken'])->name('shipments.token.revoke');
     Route::post('shipments/{shipment}/exceptions', [ShipmentController::class, 'reportException'])->name('shipments.exceptions.store');
 
     Route::get('dispatch', [DispatchController::class, 'index'])->name('dispatch.index');
     Route::get('customers', [CustomerController::class, 'index'])->name('customers.index');
     Route::post('customers', [CustomerController::class, 'store'])->name('customers.store');
     Route::get('customers/{customer}', [CustomerController::class, 'show'])->name('customers.show');
+    Route::patch('customers/{customer}', [CustomerController::class, 'update'])->name('customers.update');
     Route::post('customers/{customer}/contacts', [CustomerController::class, 'storeContact'])->name('customers.contacts.store');
     Route::post('customers/{customer}/addresses', [CustomerController::class, 'storeAddress'])->name('customers.addresses.store');
     Route::post('customers/{customer}/orders', [CustomerController::class, 'storeOrder'])->name('customers.orders.store');
@@ -64,6 +67,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::post('billing/charges', [BillingController::class, 'store'])->name('billing.store');
     Route::patch('billing/charges/{charge}', [BillingController::class, 'update'])->name('billing.update');
     Route::get('reports', [ReportController::class, 'index'])->name('reports.index');
+    Route::get('notifications', [NotificationController::class, 'index'])->name('notifications.index');
 
     Route::post('documents', [DocumentController::class, 'store'])->name('documents.store');
     Route::get('files/{file}', [DocumentController::class, 'download'])->name('files.download');
